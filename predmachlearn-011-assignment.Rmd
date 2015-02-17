@@ -1,0 +1,138 @@
+# Coursera Practical Machine Learning Writeup Assignment
+
+## Author : Dipanjan Biswas
+###  Date   : Feb 18, 2015
+
+
+#### Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. 
+
+In this project, the goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
+
+More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+#### Data 
+
+The training data for this project are available here: 
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here: 
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+#### Data Loading and Review
+
+First let us load the data
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache=TRUE)
+```
+
+```{r}
+training = read.csv("pml-training.csv")
+testing = read.csv("pml-testing.csv")
+```
+
+Next, let us take a look at the dimensions and column names of the training data
+```{r}
+dim(training)
+```
+With such a large number of columns, let us review first and last few
+
+```{r}
+head(colnames(training),n=10)
+tail(colnames(training),n=10)
+```
+
+#### Pre-Processing
+
+Having looked at the data dimensions and column names, we should now attempt some amount of pre-processing
+From their names, columns 1 to 7 do not appear to be related to actual device inputs and hence are not expected to have any bearings on the outcome viz. class of activity. 
+
+So first let us remove those columns from consideration
+```{r}
+training <- training[,-(1:7)]
+```
+
+We should now have 160-7 i.e. 153 columns of which the is the outcome
+
+Next, let us remove columns which have missing data and check dimensions once again. 
+
+But before doing that we should check if the outcome variable has missing data, in which case we cannot proceed with direct omission of missing data. We make this check by checking the sum of is.na values on 153rd column and same should be zero when there are no missing values for this column
+```{r}
+sum(is.na(training[,153]))
+```
+So we're satisfied that the outcome column has no missing values. We proceed to farther trim the data by removing columns with at least one missing values
+```{r}
+training <- training[,colSums(is.na(training))==0]
+dim(training)
+```
+We've come down from 160 to 86 columns. 
+
+Finally, we remove columns that have near zero variance - these cannot be influencers of the activity class. We take care to keep the outcome column out of our consideration routine. We use caret package
+
+```{r}
+library(caret)
+nearZeroVarColumns <- nearZeroVar(training[,-86])
+training <- training[,-nearZeroVarColumns]
+```
+
+Let us check the number of columns now and also ensure that our outcome column has not been disturbed
+```{r}
+dim(training)
+tail(colnames(training),n=10)
+```
+
+Now we proceed to model building
+
+#### Model Building
+
+First we need to farther sub-divide the training data into subsets for training the model and testing the model. We need this because even before we apply the model to the actual test data, we might need to train and compare multiple models before determining the best candidate. We'll partition the data into 75% for training and 25% for testing purposes.
+
+```{r}
+set.seed(2015)
+inTrain <- createDataPartition(training$classe, p=0.75, list=FALSE)
+trSub <- training[inTrain,]
+tsSub <- training[-inTrain,]
+```
+
+Now we train a model, using Principal Component Analysis for pre-processing and Cross-Validation. Algorithm used is Random Forest, default of caret "train" function. For PCA, threshold is set at 95%
+```{r warning=FALSE}
+model1 <- train(classe~.,data=trSub,preProcess=c("pca"),trControl=trainControl(method="cv", preProcOptions=list(thresh=0.95)))
+```
+
+Let us quickly review the model
+```{r}
+model1$finalModel
+```
+
+So we estimate **Out-of-Sample Error Rate as 2.4%**
+
+Next we predict for the test set we had culled out from the main training set. We then construct a ConfusionMatrix
+```{r}
+pred1 <- predict(model1,newdata=tsSub)
+confusionMatrix(pred1,tsSub$classe)
+```
+
+So we have an **accuracy of 98%** and given this high degree of suggested accuracy, we can now try to predict the outcomes for the actual test set
+```{r}
+predFinal <- predict(model1,newdata=testing)
+predFinal
+```
+
+The final part of this assignment is to save the predicted responses in a pre-defined format for upload
+```{r}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(predFinal)
+```
+
+On the final submission, 18 out of 20 predictions were found to be correct i.e. an **accuracy of 90%** in actual scenario
